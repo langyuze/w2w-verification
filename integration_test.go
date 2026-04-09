@@ -1,0 +1,162 @@
+package main
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"testing"
+
+	"w2w-verification/internal/handler"
+	"w2w-verification/internal/store"
+)
+
+func setupTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	s, err := store.NewStore(":memory:")
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	h := handler.NewHandler(s)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/verify", h.VerifyHandler)
+	mux.HandleFunc("/getVerificationRequest", h.GetVerificationRequestHandler)
+
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestStoreAndRetrieveRoundTrip(t *testing.T) {
+	ts := setupTestServer(t)
+
+	// Store
+	storeURL := ts.URL + "/verify?request=" + url.QueryEscape("hello world")
+	resp, err := http.Get(storeURL)
+	if err != nil {
+		t.Fatalf("GET /verify: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("store status: got %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var result struct {
+		RequestID string `json:"requestId"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if result.RequestID == "" {
+		t.Fatal("empty requestId in response")
+	}
+
+	// Retrieve
+	getURL := ts.URL + "/getVerificationRequest?requestId=" + result.RequestID
+	resp2, err := http.Get(getURL)
+	if err != nil {
+		t.Fatalf("GET /getVerificationRequest: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("retrieve status: got %d, want %d", resp2.StatusCode, http.StatusOK)
+	}
+
+	body, _ := io.ReadAll(resp2.Body)
+	if string(body) != "hello world" {
+		t.Errorf("data mismatch: got %q, want %q", body, "hello world")
+	}
+}
+
+func TestRetrieveNonExistent(t *testing.T) {
+	ts := setupTestServer(t)
+
+	resp, err := http.Get(ts.URL + "/getVerificationRequest?requestId=00000000-0000-0000-0000-000000000000")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+}
+
+func TestMissingRequestParam(t *testing.T) {
+	ts := setupTestServer(t)
+
+	resp, err := http.Get(ts.URL + "/verify")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestMissingRequestIdParam(t *testing.T) {
+	ts := setupTestServer(t)
+
+	resp, err := http.Get(ts.URL + "/getVerificationRequest")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestInvalidUUID(t *testing.T) {
+	ts := setupTestServer(t)
+
+	resp, err := http.Get(ts.URL + "/getVerificationRequest?requestId=not-a-uuid")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestBinaryDataRoundTrip(t *testing.T) {
+	ts := setupTestServer(t)
+
+	// Binary data with null bytes and high bytes
+	data := "\x00\x01\x02\xff\xfe\xfd"
+
+	storeURL := ts.URL + "/verify?request=" + url.QueryEscape(data)
+	resp, err := http.Get(storeURL)
+	if err != nil {
+		t.Fatalf("GET /verify: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		RequestID string `json:"requestId"`
+	}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	resp2, err := http.Get(ts.URL + "/getVerificationRequest?requestId=" + result.RequestID)
+	if err != nil {
+		t.Fatalf("GET /getVerificationRequest: %v", err)
+	}
+	defer resp2.Body.Close()
+
+	body, _ := io.ReadAll(resp2.Body)
+	if string(body) != data {
+		t.Errorf("binary data mismatch: got %x, want %x", body, data)
+	}
+}
