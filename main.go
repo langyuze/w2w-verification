@@ -17,6 +17,7 @@ import (
 func main() {
 	addr := flag.String("addr", ":8080", "listen address")
 	dbPath := flag.String("db", "w2w.db", "SQLite database path")
+	baseURL := flag.String("base-url", "https://demo.verifiedbygoogle.com", "public base URL for retrieval links")
 	flag.Parse()
 
 	s, err := store.NewStore(*dbPath)
@@ -26,7 +27,7 @@ func main() {
 	}
 	defer s.Close()
 
-	h := handler.NewHandler(s)
+	h := handler.NewHandler(s, *baseURL)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/verify", h.VerifyHandler)

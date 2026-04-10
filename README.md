@@ -12,7 +12,10 @@ GET /verify?request={url_encoded_data}
 
 Response (`200 OK`, `application/json`):
 ```json
-{"requestId": "550e8400-e29b-41d4-a716-446655440000"}
+{
+  "requestId": "550e8400-e29b-41d4-a716-446655440000",
+  "url": "https://demo.verifiedbygoogle.com/getVerificationRequest?requestId=550e8400-e29b-41d4-a716-446655440000"
+}
 ```
 
 ### Retrieve data
@@ -34,17 +37,18 @@ go build -o w2w-verification .
 
 ### Flags
 
-| Flag    | Default  | Description          |
-|---------|----------|----------------------|
-| `-addr` | `:8080`  | Listen address       |
-| `-db`   | `w2w.db` | SQLite database path |
+| Flag        | Default                              | Description                          |
+|-------------|--------------------------------------|--------------------------------------|
+| `-addr`     | `:8080`                              | Listen address                       |
+| `-db`       | `w2w.db`                             | SQLite database path                 |
+| `-base-url` | `https://demo.verifiedbygoogle.com`  | Public base URL for retrieval links  |
 
 ## Examples
 
 ```bash
 # Store
 curl -G --data-urlencode "request=hello world" http://localhost:8080/verify
-# {"requestId":"550e8400-e29b-41d4-a716-446655440000"}
+# {"requestId":"550e8400-e29b-41d4-a716-446655440000","url":"https://demo.verifiedbygoogle.com/getVerificationRequest?requestId=550e8400-e29b-41d4-a716-446655440000"}
 
 # Retrieve
 curl "http://localhost:8080/getVerificationRequest?requestId=550e8400-e29b-41d4-a716-446655440000"

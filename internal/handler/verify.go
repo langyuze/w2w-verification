@@ -12,19 +12,21 @@ import (
 )
 
 type Handler struct {
-	store *store.Store
+	store   *store.Store
+	baseURL string
 }
 
-func NewHandler(s *store.Store) *Handler {
-	return &Handler{store: s}
+func NewHandler(s *store.Store, baseURL string) *Handler {
+	return &Handler{store: s, baseURL: baseURL}
 }
 
 type storeResponse struct {
 	RequestID string `json:"requestId"`
+	URL       string `json:"url"`
 }
 
 // VerifyHandler handles GET /verify?request={blob}
-// Stores the blob and returns a JSON response with the generated UUID.
+// Stores the blob and returns a JSON response with the generated UUID and retrieval URL.
 func (h *Handler) VerifyHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -45,7 +47,10 @@ func (h *Handler) VerifyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(storeResponse{RequestID: id})
+	json.NewEncoder(w).Encode(storeResponse{
+		RequestID: id,
+		URL:       h.baseURL + "/getVerificationRequest?requestId=" + id,
+	})
 }
 
 // GetVerificationRequestHandler handles GET /getVerificationRequest?requestId={uuid}

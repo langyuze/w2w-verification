@@ -21,7 +21,7 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	}
 	t.Cleanup(func() { s.Close() })
 
-	h := handler.NewHandler(s)
+	h := handler.NewHandler(s, "https://demo.verifiedbygoogle.com")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/verify", h.VerifyHandler)
@@ -49,12 +49,17 @@ func TestStoreAndRetrieveRoundTrip(t *testing.T) {
 
 	var result struct {
 		RequestID string `json:"requestId"`
+		URL       string `json:"url"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if result.RequestID == "" {
 		t.Fatal("empty requestId in response")
+	}
+	expectedURL := "https://demo.verifiedbygoogle.com/getVerificationRequest?requestId=" + result.RequestID
+	if result.URL != expectedURL {
+		t.Errorf("url mismatch: got %q, want %q", result.URL, expectedURL)
 	}
 
 	// Retrieve
@@ -146,6 +151,7 @@ func TestBinaryDataRoundTrip(t *testing.T) {
 
 	var result struct {
 		RequestID string `json:"requestId"`
+		URL       string `json:"url"`
 	}
 	json.NewDecoder(resp.Body).Decode(&result)
 
