@@ -148,7 +148,9 @@
         if (parsed.dcRequest) {
           credentialOptions = { digital: parsed.dcRequest };
         } else {
-          credentialOptions = prepareOptions(parsed);
+          setStatus('Invalid payload: missing "dcRequest" field.', 'error');
+          console.error('Parsed payload has no "dcRequest" key:', parsed);
+          return;
         }
         console.log('Options ready:', JSON.stringify(credentialOptions, null, 2));
 
