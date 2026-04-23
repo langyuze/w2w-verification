@@ -113,23 +113,36 @@
           return;
         }
 
-        const buf = new Uint8Array(await res.arrayBuffer());
-        console.log('Payload bytes length:', buf.length);
+        const rawBuf = new Uint8Array(await res.arrayBuffer());
+        console.log('Payload bytes length:', rawBuf.length);
 
-        // AES-GCM layout: first 12 bytes = IV, remainder = ciphertext + 16-byte auth tag.
-        if (buf.length < 13) {
-          setStatus('Payload too short to be valid ciphertext.', 'error');
-          return;
+        // The payload may be stored as raw binary or as a base64/base64url string.
+        // Try raw binary first, then fall back to base64 decoding.
+        async function tryDecrypt(bytes) {
+          if (bytes.length < 13) throw new Error('Payload too short');
+          const iv = bytes.slice(0, 12);
+          const ct = bytes.slice(12);
+          return crypto.subtle.decrypt({ name: 'AES-GCM', iv }, cryptoKey, ct);
         }
-        const iv = buf.slice(0, 12);
-        const ciphertext = buf.slice(12);
 
-        // Decrypt.
         setStatus('Decrypting…');
-        const plaintext = await crypto.subtle.decrypt(
-          { name: 'AES-GCM', iv }, cryptoKey, ciphertext
-        );
-        console.log('Decrypted OK, plaintext length:', plaintext.byteLength);
+        let plaintext;
+        try {
+          plaintext = await tryDecrypt(rawBuf);
+          console.log('Decrypted OK (raw binary)');
+        } catch (e1) {
+          console.warn('Raw decrypt failed:', e1.name, '— trying base64 decode first');
+          try {
+            const b64str = new TextDecoder().decode(rawBuf).trim();
+            const decoded = base64UrlDecode(b64str);
+            console.log('Base64-decoded length:', decoded.length);
+            plaintext = await tryDecrypt(decoded);
+            console.log('Decrypted OK (base64-encoded payload)');
+          } catch (e2) {
+            throw new Error(`Decryption failed. Raw: ${e1.name}, Base64: ${e2.name}. Check that the key matches the one used to encrypt.`);
+          }
+        }
+        console.log('Plaintext length:', plaintext.byteLength);
 
         // Parse JSON and convert binary fields.
         const decoded = new TextDecoder().decode(plaintext);
