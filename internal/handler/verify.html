@@ -96,9 +96,11 @@
 
         // Import the AES-GCM key from the URL fragment (hex or base64url).
         const keyBytes = decodeKey(keyB64);
+        console.log('Key bytes length:', keyBytes.length);
         const cryptoKey = await crypto.subtle.importKey(
           'raw', keyBytes, { name: 'AES-GCM', length: 256 }, false, ['decrypt']
         );
+        console.log('Key imported OK');
 
         // Fetch the encrypted payload from the server.
         setStatus('Fetching verification data…');
@@ -112,6 +114,7 @@
         }
 
         const buf = new Uint8Array(await res.arrayBuffer());
+        console.log('Payload bytes length:', buf.length);
 
         // AES-GCM layout: first 12 bytes = IV, remainder = ciphertext + 16-byte auth tag.
         if (buf.length < 13) {
@@ -126,20 +129,24 @@
         const plaintext = await crypto.subtle.decrypt(
           { name: 'AES-GCM', iv }, cryptoKey, ciphertext
         );
+        console.log('Decrypted OK, plaintext length:', plaintext.byteLength);
 
         // Parse JSON and convert binary fields.
-        const options = prepareOptions(
-          JSON.parse(new TextDecoder().decode(plaintext))
-        );
+        const decoded = new TextDecoder().decode(plaintext);
+        console.log('Decrypted text:', decoded);
+        const options = prepareOptions(JSON.parse(decoded));
 
         // Invoke navigator.credentials.get().
         setStatus('Waiting for credential…');
+        console.log('Calling navigator.credentials.get() with:', options);
         await navigator.credentials.get(options);
 
         setStatus('Verification complete.', 'success');
       } catch (err) {
-        console.error(err);
-        setStatus(`Error: ${err.message || err.name || String(err)}`, 'error');
+        console.error('Verification error:', err);
+        console.error('name:', err.name, 'message:', err.message, 'str:', String(err));
+        const detail = err.message || err.name || String(err) || '(no details)';
+        setStatus(`Error: ${detail}`, 'error');
       }
     })();
   </script>
