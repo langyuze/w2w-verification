@@ -48,6 +48,18 @@
       return Uint8Array.from(atob(str), c => c.charCodeAt(0));
     }
 
+    // Accepts a 64-char hex string (AES-256) or a base64url string.
+    function decodeKey(str) {
+      if (/^[0-9a-fA-F]{64}$/.test(str)) {
+        const bytes = new Uint8Array(32);
+        for (let i = 0; i < 32; i++) {
+          bytes[i] = parseInt(str.slice(i * 2, i * 2 + 2), 16);
+        }
+        return bytes;
+      }
+      return base64UrlDecode(str);
+    }
+
     // Convert base64url strings to Uint8Array for known WebAuthn binary fields.
     function prepareOptions(options) {
       if (options.publicKey) {
@@ -82,8 +94,8 @@
           return;
         }
 
-        // Import the AES-GCM key from the URL fragment.
-        const keyBytes = base64UrlDecode(keyB64);
+        // Import the AES-GCM key from the URL fragment (hex or base64url).
+        const keyBytes = decodeKey(keyB64);
         const cryptoKey = await crypto.subtle.importKey(
           'raw', keyBytes, { name: 'AES-GCM', length: 256 }, false, ['decrypt']
         );
