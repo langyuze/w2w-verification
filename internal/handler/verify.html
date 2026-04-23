@@ -138,7 +138,8 @@
 
         setStatus('Verification complete.', 'success');
       } catch (err) {
-        setStatus(`Error: ${err.message}`, 'error');
+        console.error(err);
+        setStatus(`Error: ${err.message || err.name || String(err)}`, 'error');
       }
     })();
   </script>
