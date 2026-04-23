@@ -116,12 +116,12 @@
         console.log('Decoded ciphertext length:', encrypted.length, 'bytes');
 
         // AES-GCM layout: first 12 bytes = IV, remainder = ciphertext + 16-byte auth tag.
-        if (encrypted.length < 33) {
+        if (encrypted.length < 29) {
           setStatus('Payload too short to contain IV + ciphertext + auth tag.', 'error');
           return;
         }
-        const iv = encrypted.slice(0, 16);
-        const ciphertext = encrypted.slice(16);
+        const iv = encrypted.slice(0, 12);
+        const ciphertext = encrypted.slice(12);
         console.log('IV (hex):', Array.from(iv).map(b => b.toString(16).padStart(2,'0')).join(''));
         console.log('Ciphertext (hex):', Array.from(ciphertext).map(b => b.toString(16).padStart(2,'0')).join(''));
         console.log('Ciphertext length:', ciphertext.length, 'bytes');
