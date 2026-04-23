@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Verification Request</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      background: #f5f5f5;
+    }
+    .card {
+      background: white;
+      border-radius: 8px;
+      padding: 32px 40px;
+      max-width: 420px;
+      width: 100%;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      text-align: center;
+    }
+    h1 { font-size: 1.2rem; margin: 0 0 20px; color: #1a1a1a; }
+    #status { font-size: 0.95rem; color: #555; line-height: 1.5; }
+    #status.error { color: #c0392b; }
+    #status.success { color: #27ae60; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Verification Request</h1>
+    <p id="status">Preparing verification&hellip;</p>
+  </div>
+  <script>
+    const statusEl = document.getElementById('status');
+
+    function setStatus(msg, type) {
+      statusEl.textContent = msg;
+      statusEl.className = type || '';
+    }
+
+    function base64UrlDecode(str) {
+      str = str.replace(/-/g, '+').replace(/_/g, '/');
+      while (str.length % 4) str += '=';
+      return Uint8Array.from(atob(str), c => c.charCodeAt(0));
+    }
+
+    // Convert base64url strings to Uint8Array for known WebAuthn binary fields.
+    function prepareOptions(options) {
+      if (options.publicKey) {
+        const pk = options.publicKey;
+        if (typeof pk.challenge === 'string') {
+          pk.challenge = base64UrlDecode(pk.challenge);
+        }
+        if (Array.isArray(pk.allowCredentials)) {
+          pk.allowCredentials = pk.allowCredentials.map(c => ({
+            ...c,
+            id: typeof c.id === 'string' ? base64UrlDecode(c.id) : c.id,
+          }));
+        }
+        if (pk.user && typeof pk.user.id === 'string') {
+          pk.user.id = base64UrlDecode(pk.user.id);
+        }
+      }
+      return options;
+    }
+
+    (async () => {
+      try {
+        const requestId = new URLSearchParams(window.location.search).get('requestId');
+        const keyB64 = window.location.hash.slice(1);
+
+        if (!requestId) {
+          setStatus('Missing requestId parameter.', 'error');
+          return;
+        }
+        if (!keyB64) {
+          setStatus('Missing encryption key in URL.', 'error');
+          return;
+        }
+
+        // Import the AES-GCM key from the URL fragment.
+        const keyBytes = base64UrlDecode(keyB64);
+        const cryptoKey = await crypto.subtle.importKey(
+          'raw', keyBytes, { name: 'AES-GCM', length: 256 }, false, ['decrypt']
+        );
+
+        // Fetch the encrypted payload from the server.
+        setStatus('Fetching verification data…');
+        const res = await fetch(
+          `/getVerificationRequest?requestId=${encodeURIComponent(requestId)}`,
+          { headers: { Accept: 'application/octet-stream' } }
+        );
+        if (!res.ok) {
+          setStatus(`Failed to fetch payload (${res.status}).`, 'error');
+          return;
+        }
+
+        const buf = new Uint8Array(await res.arrayBuffer());
+
+        // AES-GCM layout: first 12 bytes = IV, remainder = ciphertext + 16-byte auth tag.
+        if (buf.length < 13) {
+          setStatus('Payload too short to be valid ciphertext.', 'error');
+          return;
+        }
+        const iv = buf.slice(0, 12);
+        const ciphertext = buf.slice(12);
+
+        // Decrypt.
+        setStatus('Decrypting…');
+        const plaintext = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv }, cryptoKey, ciphertext
+        );
+
+        // Parse JSON and convert binary fields.
+        const options = prepareOptions(
+          JSON.parse(new TextDecoder().decode(plaintext))
+        );
+
+        // Invoke navigator.credentials.get().
+        setStatus('Waiting for credential…');
+        await navigator.credentials.get(options);
+
+        setStatus('Verification complete.', 'success');
+      } catch (err) {
+        setStatus(`Error: ${err.message}`, 'error');
+      }
+    })();
+  </script>
+</body>
+</html>

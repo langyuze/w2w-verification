@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"w2w-verification/internal/handler"
@@ -133,6 +134,30 @@ func TestInvalidUUID(t *testing.T) {
 
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestGetVerificationRequestServesHTMLForBrowser(t *testing.T) {
+	ts := setupTestServer(t)
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/getVerificationRequest?requestId=00000000-0000-0000-0000-000000000000", nil)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("content-type: got %q, want text/html", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "navigator.credentials.get") {
+		t.Error("HTML page missing expected JS content")
 	}
 }
 

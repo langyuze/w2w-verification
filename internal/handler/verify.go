@@ -1,15 +1,20 @@
 package handler
 
 import (
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 
 	"w2w-verification/internal/store"
 )
+
+//go:embed verify.html
+var verifyPageHTML []byte
 
 type Handler struct {
 	store   *store.Store
@@ -54,10 +59,18 @@ func (h *Handler) VerifyHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetVerificationRequestHandler handles GET /getVerificationRequest?requestId={uuid}
-// Returns the stored blob for the given UUID.
+// Browser requests (Accept: text/html) receive the decryption UI page.
+// API requests receive the raw stored blob.
 func (h *Handler) GetVerificationRequestHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Serve the HTML page for browser navigation.
+	if strings.Contains(r.Header.Get("Accept"), "text/html") {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(verifyPageHTML)
 		return
 	}
 
