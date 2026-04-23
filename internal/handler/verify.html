@@ -126,6 +126,11 @@
         }
 
         setStatus('Decrypting…');
+        // Log the raw payload as hex for debugging.
+        const payloadHex = Array.from(rawBuf).map(b => b.toString(16).padStart(2,'0')).join('');
+        console.log('Encrypted payload (hex):', payloadHex);
+        console.log('Encrypted payload (text):', new TextDecoder().decode(rawBuf));
+
         let plaintext;
         try {
           plaintext = await tryDecrypt(rawBuf);
@@ -142,12 +147,11 @@
             throw new Error(`Decryption failed. Raw: ${e1.name}, Base64: ${e2.name}. Check that the key matches the one used to encrypt.`);
           }
         }
-        console.log('Plaintext length:', plaintext.byteLength);
+        const decryptedText = new TextDecoder().decode(plaintext);
+        console.log('Decrypted payload:', decryptedText);
 
         // Parse JSON and convert binary fields.
-        const decoded = new TextDecoder().decode(plaintext);
-        console.log('Decrypted text:', decoded);
-        const options = prepareOptions(JSON.parse(decoded));
+        const options = prepareOptions(JSON.parse(decryptedText));
 
         // Invoke navigator.credentials.get().
         setStatus('Waiting for credential…');
