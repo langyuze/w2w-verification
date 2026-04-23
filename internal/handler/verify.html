@@ -142,7 +142,14 @@
         const decryptedText = new TextDecoder().decode(plaintext);
         console.log('Decrypted payload:', decryptedText);
 
-        credentialOptions = prepareOptions(JSON.parse(decryptedText));
+        const parsed = JSON.parse(decryptedText);
+
+        // Extract "dcRequest" and repackage under "digital" for the DC API.
+        if (parsed.dcRequest) {
+          credentialOptions = { digital: parsed.dcRequest };
+        } else {
+          credentialOptions = prepareOptions(parsed);
+        }
         console.log('Options ready:', JSON.stringify(credentialOptions, null, 2));
 
         setStatus('Ready. Click the button to present your credential.');
