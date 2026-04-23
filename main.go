@@ -32,6 +32,8 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/verify", h.VerifyHandler)
 	mux.HandleFunc("/getVerificationRequest", h.GetVerificationRequestHandler)
+	mux.HandleFunc("/setVerificationResponse", h.SetVerificationResponseHandler)
+	mux.HandleFunc("/getVerificationResponse", h.GetVerificationResponseHandler)
 
 	srv := &http.Server{
 		Addr:    *addr,

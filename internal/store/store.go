@@ -34,12 +34,16 @@ func NewStore(dbPath string) (*Store, error) {
 		CREATE TABLE IF NOT EXISTS verifications (
 			id         TEXT PRIMARY KEY,
 			data       BLOB NOT NULL,
+			response   BLOB,
 			created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 		)
 	`); err != nil {
 		db.Close()
 		return nil, err
 	}
+
+	// Migrate existing tables that don't have the response column.
+	db.Exec("ALTER TABLE verifications ADD COLUMN response BLOB")
 
 	return &Store{db: db}, nil
 }
@@ -64,6 +68,33 @@ func (s *Store) Get(ctx context.Context, id string) (*model.Record, error) {
 		return nil, err
 	}
 	return &rec, nil
+}
+
+func (s *Store) SetResponse(ctx context.Context, id string, response []byte) error {
+	result, err := s.db.ExecContext(ctx, "UPDATE verifications SET response = ? WHERE id = ?", response, id)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) GetResponse(ctx context.Context, id string) ([]byte, error) {
+	row := s.db.QueryRowContext(ctx, "SELECT response FROM verifications WHERE id = ?", id)
+	var response []byte
+	if err := row.Scan(&response); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return response, nil
 }
 
 func (s *Store) Close() error {

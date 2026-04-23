@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -98,4 +99,80 @@ func (h *Handler) GetVerificationRequestHandler(w http.ResponseWriter, r *http.R
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Write(rec.Data)
+}
+
+// SetVerificationResponseHandler handles POST /setVerificationResponse?requestId={uuid}
+// Stores the credential response payload for the given request ID.
+func (h *Handler) SetVerificationResponseHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idParam := r.URL.Query().Get("requestId")
+	if idParam == "" {
+		http.Error(w, "missing required query parameter: requestId", http.StatusBadRequest)
+		return
+	}
+
+	if _, err := uuid.Parse(idParam); err != nil {
+		http.Error(w, "invalid requestId: must be a valid UUID", http.StatusBadRequest)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "failed to read request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.store.SetResponse(r.Context(), idParam, body); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		slog.Error("failed to store response", "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+// GetVerificationResponseHandler handles GET /getVerificationResponse?requestId={uuid}
+// Returns the stored credential response, or empty string if none exists.
+func (h *Handler) GetVerificationResponseHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idParam := r.URL.Query().Get("requestId")
+	if idParam == "" {
+		http.Error(w, "missing required query parameter: requestId", http.StatusBadRequest)
+		return
+	}
+
+	if _, err := uuid.Parse(idParam); err != nil {
+		http.Error(w, "invalid requestId: must be a valid UUID", http.StatusBadRequest)
+		return
+	}
+
+	response, err := h.store.GetResponse(r.Context(), idParam)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		slog.Error("failed to retrieve response", "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	if response == nil {
+		w.Write([]byte(""))
+		return
+	}
+	w.Write(response)
 }
