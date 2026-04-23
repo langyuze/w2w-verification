@@ -42,22 +42,18 @@
       statusEl.className = type || '';
     }
 
+    function hexDecode(str) {
+      const bytes = new Uint8Array(str.length / 2);
+      for (let i = 0; i < bytes.length; i++) {
+        bytes[i] = parseInt(str.slice(i * 2, i * 2 + 2), 16);
+      }
+      return bytes;
+    }
+
     function base64UrlDecode(str) {
       str = str.replace(/-/g, '+').replace(/_/g, '/');
       while (str.length % 4) str += '=';
       return Uint8Array.from(atob(str), c => c.charCodeAt(0));
-    }
-
-    // Accepts a 64-char hex string (AES-256) or a base64url string.
-    function decodeKey(str) {
-      if (/^[0-9a-fA-F]{64}$/.test(str)) {
-        const bytes = new Uint8Array(32);
-        for (let i = 0; i < 32; i++) {
-          bytes[i] = parseInt(str.slice(i * 2, i * 2 + 2), 16);
-        }
-        return bytes;
-      }
-      return base64UrlDecode(str);
     }
 
     // Convert base64url strings to Uint8Array for known WebAuthn binary fields.
@@ -83,20 +79,20 @@
     (async () => {
       try {
         const requestId = new URLSearchParams(window.location.search).get('requestId');
-        const keyB64 = window.location.hash.slice(1);
+        const keyHex = window.location.hash.slice(1);
 
         if (!requestId) {
           setStatus('Missing requestId parameter.', 'error');
           return;
         }
-        if (!keyB64) {
+        if (!keyHex) {
           setStatus('Missing encryption key in URL.', 'error');
           return;
         }
 
-        // Import the AES-GCM key from the URL fragment (hex or base64url).
-        const keyBytes = decodeKey(keyB64);
-        console.log('Key bytes length:', keyBytes.length);
+        // Key is always hex-encoded (64 hex chars = 32 bytes = AES-256).
+        const keyBytes = hexDecode(keyHex);
+        console.log('Key length:', keyBytes.length, 'bytes');
         const cryptoKey = await crypto.subtle.importKey(
           'raw', keyBytes, { name: 'AES-GCM', length: 256 }, false, ['decrypt']
         );
@@ -113,40 +109,27 @@
           return;
         }
 
-        const rawBuf = new Uint8Array(await res.arrayBuffer());
-        console.log('Payload bytes length:', rawBuf.length);
+        // Payload is always base64url-encoded. Decode to raw bytes.
+        const rawText = await res.text();
+        console.log('Payload from server (base64url):', rawText);
+        const encrypted = base64UrlDecode(rawText.trim());
+        console.log('Decoded ciphertext length:', encrypted.length, 'bytes');
 
-        // The payload may be stored as raw binary or as a base64/base64url string.
-        // Try raw binary first, then fall back to base64 decoding.
-        async function tryDecrypt(bytes) {
-          if (bytes.length < 13) throw new Error('Payload too short');
-          const iv = bytes.slice(0, 12);
-          const ct = bytes.slice(12);
-          return crypto.subtle.decrypt({ name: 'AES-GCM', iv }, cryptoKey, ct);
+        // AES-GCM layout: first 12 bytes = IV, remainder = ciphertext + 16-byte auth tag.
+        if (encrypted.length < 29) {
+          setStatus('Payload too short to contain IV + ciphertext + auth tag.', 'error');
+          return;
         }
+        const iv = encrypted.slice(0, 12);
+        const ciphertext = encrypted.slice(12);
+        console.log('IV (hex):', Array.from(iv).map(b => b.toString(16).padStart(2,'0')).join(''));
+        console.log('Ciphertext length:', ciphertext.length, 'bytes');
 
+        // Decrypt.
         setStatus('Decrypting…');
-        // Log the raw payload as hex for debugging.
-        const payloadHex = Array.from(rawBuf).map(b => b.toString(16).padStart(2,'0')).join('');
-        console.log('Encrypted payload (hex):', payloadHex);
-        console.log('Encrypted payload (text):', new TextDecoder().decode(rawBuf));
-
-        let plaintext;
-        try {
-          plaintext = await tryDecrypt(rawBuf);
-          console.log('Decrypted OK (raw binary)');
-        } catch (e1) {
-          console.warn('Raw decrypt failed:', e1.name, '— trying base64 decode first');
-          try {
-            const b64str = new TextDecoder().decode(rawBuf).trim();
-            const decoded = base64UrlDecode(b64str);
-            console.log('Base64-decoded length:', decoded.length);
-            plaintext = await tryDecrypt(decoded);
-            console.log('Decrypted OK (base64-encoded payload)');
-          } catch (e2) {
-            throw new Error(`Decryption failed. Raw: ${e1.name}, Base64: ${e2.name}. Check that the key matches the one used to encrypt.`);
-          }
-        }
+        const plaintext = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv }, cryptoKey, ciphertext
+        );
         const decryptedText = new TextDecoder().decode(plaintext);
         console.log('Decrypted payload:', decryptedText);
 
@@ -155,13 +138,12 @@
 
         // Invoke navigator.credentials.get().
         setStatus('Waiting for credential…');
-        console.log('Calling navigator.credentials.get() with:', options);
+        console.log('Calling navigator.credentials.get() with:', JSON.stringify(options, null, 2));
         await navigator.credentials.get(options);
 
         setStatus('Verification complete.', 'success');
       } catch (err) {
         console.error('Verification error:', err);
-        console.error('name:', err.name, 'message:', err.message, 'str:', String(err));
         const detail = err.message || err.name || String(err) || '(no details)';
         setStatus(`Error: ${detail}`, 'error');
       }
