@@ -27,15 +27,30 @@
     #status { font-size: 0.95rem; color: #555; line-height: 1.5; }
     #status.error { color: #c0392b; }
     #status.success { color: #27ae60; }
+    #verify-btn {
+      display: none;
+      margin: 20px auto 0;
+      padding: 12px 32px;
+      font-size: 1rem;
+      background: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    #verify-btn:hover { background: #1557b0; }
+    #verify-btn:disabled { background: #ccc; cursor: not-allowed; }
   </style>
 </head>
 <body>
   <div class="card">
     <h1>Verification Request</h1>
     <p id="status">Preparing verification&hellip;</p>
+    <button id="verify-btn">Verify</button>
   </div>
   <script>
     const statusEl = document.getElementById('status');
+    const verifyBtn = document.getElementById('verify-btn');
 
     function setStatus(msg, type) {
       statusEl.textContent = msg;
@@ -56,15 +71,10 @@
       return Uint8Array.from(atob(str), c => c.charCodeAt(0));
     }
 
-    // Prepare options based on the credential type.
-    // - Digital Credentials API: { digital: { requests: [...] } }
-    // - WebAuthn: { publicKey: { challenge, ... } }
     function prepareOptions(options) {
-      // Digital Credentials API — pass as-is, no binary conversion needed.
       if (options.digital) {
         return options;
       }
-      // WebAuthn — convert base64url strings to Uint8Array for binary fields.
       if (options.publicKey) {
         const pk = options.publicKey;
         if (typeof pk.challenge === 'string') {
@@ -83,6 +93,10 @@
       return options;
     }
 
+    // Phase 1: fetch and decrypt on page load.
+    // Phase 2: call navigator.credentials.get() on button click (requires user gesture).
+    let credentialOptions = null;
+
     (async () => {
       try {
         const requestId = new URLSearchParams(window.location.search).get('requestId');
@@ -97,7 +111,6 @@
           return;
         }
 
-        // Key is always hex-encoded (64 hex chars = 32 bytes = AES-256).
         const keyBytes = hexDecode(keyHex);
         console.log('Key length:', keyBytes.length, 'bytes');
         const cryptoKey = await crypto.subtle.importKey(
@@ -105,7 +118,6 @@
         );
         console.log('Key imported OK');
 
-        // Fetch the encrypted payload from the server.
         setStatus('Fetching verification data…');
         const res = await fetch(
           `/getVerificationRequest?requestId=${encodeURIComponent(requestId)}`,
@@ -116,13 +128,11 @@
           return;
         }
 
-        // Payload is always base64url-encoded. Decode to raw bytes.
         const rawText = await res.text();
         console.log('Payload from server (base64url):', rawText);
         const encrypted = base64UrlDecode(rawText.trim());
         console.log('Decoded ciphertext length:', encrypted.length, 'bytes');
 
-        // AES-GCM layout: first 12 bytes = IV, remainder = ciphertext + 16-byte auth tag.
         if (encrypted.length < 29) {
           setStatus('Payload too short to contain IV + ciphertext + auth tag.', 'error');
           return;
@@ -133,7 +143,6 @@
         console.log('Ciphertext (hex):', Array.from(ciphertext).map(b => b.toString(16).padStart(2,'0')).join(''));
         console.log('Ciphertext length:', ciphertext.length, 'bytes');
 
-        // Decrypt.
         setStatus('Decrypting…');
         const plaintext = await crypto.subtle.decrypt(
           { name: 'AES-GCM', iv }, cryptoKey, ciphertext
@@ -141,21 +150,33 @@
         const decryptedText = new TextDecoder().decode(plaintext);
         console.log('Decrypted payload:', decryptedText);
 
-        // Parse JSON and convert binary fields.
-        const options = prepareOptions(JSON.parse(decryptedText));
+        credentialOptions = prepareOptions(JSON.parse(decryptedText));
+        console.log('Options ready:', JSON.stringify(credentialOptions, null, 2));
 
-        // Invoke navigator.credentials.get().
-        setStatus('Waiting for credential…');
-        console.log('Calling navigator.credentials.get() with:', JSON.stringify(options, null, 2));
-        await navigator.credentials.get(options);
-
-        setStatus('Verification complete.', 'success');
+        setStatus('Ready. Click the button to present your credential.');
+        verifyBtn.style.display = 'inline-block';
       } catch (err) {
         console.error('Verification error:', err);
         const detail = err.message || err.name || String(err) || '(no details)';
         setStatus(`Error: ${detail}`, 'error');
       }
     })();
+
+    verifyBtn.addEventListener('click', async () => {
+      try {
+        verifyBtn.disabled = true;
+        setStatus('Waiting for credential…');
+        console.log('Calling navigator.credentials.get() with:', credentialOptions);
+        const credential = await navigator.credentials.get(credentialOptions);
+        console.log('Credential received:', credential);
+        setStatus('Verification complete.', 'success');
+      } catch (err) {
+        console.error('Credential error:', err);
+        const detail = err.message || err.name || String(err) || '(no details)';
+        setStatus(`Error: ${detail}`, 'error');
+        verifyBtn.disabled = false;
+      }
+    });
   </script>
 </body>
 </html>
