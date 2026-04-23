@@ -57,14 +57,6 @@
       statusEl.className = type || '';
     }
 
-    function hexDecode(str) {
-      const bytes = new Uint8Array(str.length / 2);
-      for (let i = 0; i < bytes.length; i++) {
-        bytes[i] = parseInt(str.slice(i * 2, i * 2 + 2), 16);
-      }
-      return bytes;
-    }
-
     function base64UrlDecode(str) {
       str = str.replace(/-/g, '+').replace(/_/g, '/');
       while (str.length % 4) str += '=';
@@ -100,18 +92,18 @@
     (async () => {
       try {
         const requestId = new URLSearchParams(window.location.search).get('requestId');
-        const keyHex = window.location.hash.slice(1);
+        const keyB64 = window.location.hash.slice(1);
 
         if (!requestId) {
           setStatus('Missing requestId parameter.', 'error');
           return;
         }
-        if (!keyHex) {
+        if (!keyB64) {
           setStatus('Missing encryption key in URL.', 'error');
           return;
         }
 
-        const keyBytes = hexDecode(keyHex);
+        const keyBytes = base64UrlDecode(keyB64);
         console.log('Key length:', keyBytes.length, 'bytes');
         const cryptoKey = await crypto.subtle.importKey(
           'raw', keyBytes, { name: 'AES-GCM', length: 256 }, false, ['decrypt']
