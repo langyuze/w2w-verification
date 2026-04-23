@@ -56,8 +56,15 @@
       return Uint8Array.from(atob(str), c => c.charCodeAt(0));
     }
 
-    // Convert base64url strings to Uint8Array for known WebAuthn binary fields.
+    // Prepare options based on the credential type.
+    // - Digital Credentials API: { digital: { requests: [...] } }
+    // - WebAuthn: { publicKey: { challenge, ... } }
     function prepareOptions(options) {
+      // Digital Credentials API — pass as-is, no binary conversion needed.
+      if (options.digital) {
+        return options;
+      }
+      // WebAuthn — convert base64url strings to Uint8Array for binary fields.
       if (options.publicKey) {
         const pk = options.publicKey;
         if (typeof pk.challenge === 'string') {
