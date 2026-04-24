@@ -146,7 +146,7 @@
 
         // Extract "dcRequest" and repackage under "digital" for the DC API.
         if (parsed.dcRequest) {
-          credentialOptions = { digital: parsed.dcRequest };
+          credentialOptions = { mediation: 'required', digital: parsed.dcRequest };
         } else {
           setStatus('Invalid payload: missing "dcRequest" field.', 'error');
           console.error('Parsed payload has no "dcRequest" key:', parsed);
