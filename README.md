@@ -1,13 +1,14 @@
 # w2w-verification
 
-HTTP server for storing and retrieving verification request data. Submit a blob of data, receive a UUID. Use the UUID to retrieve the data later.
+HTTP server for storing and retrieving encrypted verification request data. Submit encrypted credential request payloads, receive a UUID. Share the URL with the encryption key in the fragment to let users present their digital credentials via the Digital Credentials API.
 
 ## API
 
 ### Store data
 
 ```
-GET /verify?request={url_encoded_data}
+POST /verify
+Body: <encrypted payload bytes>
 ```
 
 Response (`200 OK`, `application/json`):
@@ -18,15 +19,46 @@ Response (`200 OK`, `application/json`):
 }
 ```
 
-### Retrieve data
+### Retrieve data (API)
 
 ```
 GET /getVerificationRequest?requestId={uuid}
+Accept: application/octet-stream
 ```
 
 Response (`200 OK`, `application/octet-stream`): raw blob bytes.
 
-Returns `404` if the UUID is not found, `400` if the UUID format is invalid.
+### Retrieve data (Browser)
+
+```
+GET /getVerificationRequest?requestId={uuid}#<base64url-encoded-AES-key>
+Accept: text/html
+```
+
+When opened in a browser, serves an HTML page that:
+1. Reads the AES-256-GCM key from the URL fragment (never sent to server)
+2. Fetches the encrypted payload from the server
+3. Decrypts it (IV = first 12 bytes, remainder = ciphertext + auth tag)
+4. Extracts `dcRequest` and repackages it under `digital`
+5. Shows a "Verify" button; on click calls `navigator.credentials.get()`
+6. Persists the credential response back to the server
+
+### Get verification response
+
+```
+GET /getVerificationResponse?requestId={uuid}
+```
+
+Returns the credential response payload if available, or empty string if not yet submitted.
+
+### Set verification response
+
+```
+POST /setVerificationResponse?requestId={uuid}
+Body: <credential response JSON>
+```
+
+Stores the credential response for the given request ID.
 
 ## Build & Run
 
@@ -47,12 +79,14 @@ go build -o w2w-verification .
 
 ```bash
 # Store
-curl -G --data-urlencode "request=hello world" http://localhost:8080/verify
-# {"requestId":"550e8400-e29b-41d4-a716-446655440000","url":"https://demo.verifiedbygoogle.com/getVerificationRequest?requestId=550e8400-e29b-41d4-a716-446655440000"}
+curl -X POST -d '{"encrypted":"payload"}' http://localhost:8080/verify
+# {"requestId":"550e8400-...","url":"https://demo.verifiedbygoogle.com/getVerificationRequest?requestId=550e8400-..."}
 
-# Retrieve
-curl "http://localhost:8080/getVerificationRequest?requestId=550e8400-e29b-41d4-a716-446655440000"
-# hello world
+# Retrieve raw payload
+curl "http://localhost:8080/getVerificationRequest?requestId=550e8400-..."
+
+# Check verification response
+curl "http://localhost:8080/getVerificationResponse?requestId=550e8400-..."
 ```
 
 ## Run Tests
