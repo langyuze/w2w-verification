@@ -1,6 +1,6 @@
 # w2w-verification
 
-HTTP server for storing and retrieving encrypted verification request data. Submit encrypted credential request payloads, receive a UUID. Share the URL with the encryption key in the fragment to let users present their digital credentials via the Digital Credentials API.
+HTTP server for storing and retrieving verification request data. Submit a request payload containing an encrypted credential request, receive a UUID. Share the URL with the encryption key in the fragment to let users present their digital credentials via the Digital Credentials API.
 
 ## API
 
@@ -8,7 +8,7 @@ HTTP server for storing and retrieving encrypted verification request data. Subm
 
 ```
 POST /verify
-Body: <encrypted payload bytes>
+Body: <request payload>
 ```
 
 Response (`200 OK`, `application/json`):
