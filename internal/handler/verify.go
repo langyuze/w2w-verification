@@ -31,21 +31,25 @@ type storeResponse struct {
 	URL       string `json:"url"`
 }
 
-// VerifyHandler handles GET /verify?request={blob}
-// Stores the blob and returns a JSON response with the generated UUID and retrieval URL.
+// VerifyHandler handles POST /verify
+// Stores the request body and returns a JSON response with the generated UUID and retrieval URL.
 func (h *Handler) VerifyHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	reqParam := r.URL.Query().Get("request")
-	if reqParam == "" {
-		http.Error(w, "missing required query parameter: request", http.StatusBadRequest)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "failed to read request body", http.StatusBadRequest)
+		return
+	}
+	if len(body) == 0 {
+		http.Error(w, "empty request body", http.StatusBadRequest)
 		return
 	}
 
-	id, err := h.store.Insert(r.Context(), []byte(reqParam))
+	id, err := h.store.Insert(r.Context(), body)
 	if err != nil {
 		slog.Error("failed to store data", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)

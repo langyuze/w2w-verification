@@ -1,11 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 
@@ -27,20 +27,19 @@ func setupTestServer(t *testing.T) *httptest.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/verify", h.VerifyHandler)
 	mux.HandleFunc("/getVerificationRequest", h.GetVerificationRequestHandler)
+	mux.HandleFunc("/setVerificationResponse", h.SetVerificationResponseHandler)
+	mux.HandleFunc("/getVerificationResponse", h.GetVerificationResponseHandler)
 
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 	return ts
 }
 
-func TestStoreAndRetrieveRoundTrip(t *testing.T) {
-	ts := setupTestServer(t)
-
-	// Store
-	storeURL := ts.URL + "/verify?request=" + url.QueryEscape("hello world")
-	resp, err := http.Get(storeURL)
+func postVerify(t *testing.T, ts *httptest.Server, body string) (string, string) {
+	t.Helper()
+	resp, err := http.Post(ts.URL+"/verify", "application/octet-stream", strings.NewReader(body))
 	if err != nil {
-		t.Fatalf("GET /verify: %v", err)
+		t.Fatalf("POST /verify: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -55,17 +54,24 @@ func TestStoreAndRetrieveRoundTrip(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if result.RequestID == "" {
+	return result.RequestID, result.URL
+}
+
+func TestStoreAndRetrieveRoundTrip(t *testing.T) {
+	ts := setupTestServer(t)
+
+	requestID, resultURL := postVerify(t, ts, "hello world")
+
+	if requestID == "" {
 		t.Fatal("empty requestId in response")
 	}
-	expectedURL := "https://demo.verifiedbygoogle.com/getVerificationRequest?requestId=" + result.RequestID
-	if result.URL != expectedURL {
-		t.Errorf("url mismatch: got %q, want %q", result.URL, expectedURL)
+	expectedURL := "https://demo.verifiedbygoogle.com/getVerificationRequest?requestId=" + requestID
+	if resultURL != expectedURL {
+		t.Errorf("url mismatch: got %q, want %q", resultURL, expectedURL)
 	}
 
 	// Retrieve
-	getURL := ts.URL + "/getVerificationRequest?requestId=" + result.RequestID
-	resp2, err := http.Get(getURL)
+	resp2, err := http.Get(ts.URL + "/getVerificationRequest?requestId=" + requestID)
 	if err != nil {
 		t.Fatalf("GET /getVerificationRequest: %v", err)
 	}
@@ -95,7 +101,21 @@ func TestRetrieveNonExistent(t *testing.T) {
 	}
 }
 
-func TestMissingRequestParam(t *testing.T) {
+func TestEmptyBody(t *testing.T) {
+	ts := setupTestServer(t)
+
+	resp, err := http.Post(ts.URL+"/verify", "application/octet-stream", strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+}
+
+func TestVerifyRejectsGet(t *testing.T) {
 	ts := setupTestServer(t)
 
 	resp, err := http.Get(ts.URL + "/verify")
@@ -104,8 +124,8 @@ func TestMissingRequestParam(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("status: got %d, want %d", resp.StatusCode, http.StatusMethodNotAllowed)
 	}
 }
 
@@ -164,19 +184,16 @@ func TestGetVerificationRequestServesHTMLForBrowser(t *testing.T) {
 func TestBinaryDataRoundTrip(t *testing.T) {
 	ts := setupTestServer(t)
 
-	// Binary data with null bytes and high bytes
-	data := "\x00\x01\x02\xff\xfe\xfd"
+	data := []byte{0x00, 0x01, 0x02, 0xff, 0xfe, 0xfd}
 
-	storeURL := ts.URL + "/verify?request=" + url.QueryEscape(data)
-	resp, err := http.Get(storeURL)
+	resp, err := http.Post(ts.URL+"/verify", "application/octet-stream", bytes.NewReader(data))
 	if err != nil {
-		t.Fatalf("GET /verify: %v", err)
+		t.Fatalf("POST /verify: %v", err)
 	}
 	defer resp.Body.Close()
 
 	var result struct {
 		RequestID string `json:"requestId"`
-		URL       string `json:"url"`
 	}
 	json.NewDecoder(resp.Body).Decode(&result)
 
@@ -187,7 +204,46 @@ func TestBinaryDataRoundTrip(t *testing.T) {
 	defer resp2.Body.Close()
 
 	body, _ := io.ReadAll(resp2.Body)
-	if string(body) != data {
+	if !bytes.Equal(body, data) {
 		t.Errorf("binary data mismatch: got %x, want %x", body, data)
+	}
+}
+
+func TestVerificationResponseRoundTrip(t *testing.T) {
+	ts := setupTestServer(t)
+
+	requestID, _ := postVerify(t, ts, "test payload")
+
+	// Response should be empty initially
+	resp, err := http.Get(ts.URL + "/getVerificationResponse?requestId=" + requestID)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != "" {
+		t.Errorf("expected empty response, got %q", body)
+	}
+
+	// Set a response
+	responsePayload := `{"data":"test-credential","protocol":"openid4vp"}`
+	setResp, err := http.Post(ts.URL+"/setVerificationResponse?requestId="+requestID, "application/json", strings.NewReader(responsePayload))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	setResp.Body.Close()
+	if setResp.StatusCode != http.StatusOK {
+		t.Fatalf("set response status: got %d, want %d", setResp.StatusCode, http.StatusOK)
+	}
+
+	// Retrieve the response
+	resp2, err := http.Get(ts.URL + "/getVerificationResponse?requestId=" + requestID)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp2.Body.Close()
+	body2, _ := io.ReadAll(resp2.Body)
+	if string(body2) != responsePayload {
+		t.Errorf("response mismatch: got %q, want %q", body2, responsePayload)
 	}
 }
